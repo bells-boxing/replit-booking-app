@@ -9,11 +9,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
-// Load Stripe
-if (!import.meta.env.VITE_STRIPE_PUBLIC_KEY) {
-  throw new Error('Missing required Stripe key: VITE_STRIPE_PUBLIC_KEY');
-}
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY || 'pk_test_placeholder');
+// Load Stripe only if public key is available
+const stripePromise = import.meta.env.VITE_STRIPE_PUBLIC_KEY 
+  ? loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY)
+  : null;
 
 const CheckoutForm = ({ 
   amount, 
@@ -77,20 +76,7 @@ const CheckoutForm = ({
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="bg-bells-darker p-4 rounded-lg border border-bells-gray/50">
-            <PaymentElement 
-              options={{
-                style: {
-                  base: {
-                    color: '#ffffff',
-                    fontFamily: 'Inter, sans-serif',
-                    fontSize: '16px',
-                    '::placeholder': {
-                      color: '#6b7280',
-                    },
-                  },
-                },
-              }}
-            />
+            <PaymentElement />
           </div>
 
           <Button 
@@ -134,6 +120,37 @@ export default function Checkout() {
   const [paymentType, setPaymentType] = useState<'membership' | 'session'>('membership');
   const [amount, setAmount] = useState(89.99);
   const [description, setDescription] = useState("Premium Membership");
+  
+  // Check if Stripe is configured
+  if (!stripePromise) {
+    return (
+      <div className="min-h-screen bg-bells-darker">
+        <Navigation />
+        <div className="max-w-4xl mx-auto px-4 py-8">
+          <Card className="bg-bells-dark border-bells-gray">
+            <CardContent className="p-8 text-center">
+              <h1 className="text-3xl font-bold text-white mb-4">Payment Processing Unavailable</h1>
+              <p className="text-gray-400 mb-6">
+                Payment processing is currently not configured. Please contact the gym administrator to complete your purchase.
+              </p>
+              <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-4 mb-6">
+                <p className="text-yellow-400 text-sm">
+                  <i className="fas fa-info-circle mr-2"></i>
+                  This is a development mode message. In production, Stripe payment processing would be available.
+                </p>
+              </div>
+              <Button 
+                onClick={() => window.history.back()}
+                className="bg-bells-gold text-bells-dark hover:bg-bells-amber font-bold py-3 px-6"
+              >
+                Go Back
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   useEffect(() => {
     // Get payment intent from URL params or default to membership
@@ -290,13 +307,13 @@ export default function Checkout() {
                   </div>
                   <div>
                     <h4 className="font-semibold text-white" data-testid="text-customer-name">
-                      {user?.firstName} {user?.lastName}
+                      {(user as any)?.firstName} {(user as any)?.lastName}
                     </h4>
                     <p className="text-gray-400 text-sm" data-testid="text-customer-email">
-                      {user?.email}
+                      {(user as any)?.email}
                     </p>
                     <Badge className="mt-1 bg-bells-gold/20 text-bells-gold">
-                      {user?.membershipType || 'basic'} Member
+                      {(user as any)?.membershipType || 'basic'} Member
                     </Badge>
                   </div>
                 </div>

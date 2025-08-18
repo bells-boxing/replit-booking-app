@@ -5,13 +5,13 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { insertClassBookingSchema, insertPersonalTrainingSessionSchema, insertPaymentSchema } from "@shared/schema";
 
-if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error('Missing required Stripe secret: STRIPE_SECRET_KEY. Please add it to your environment variables.');
+// Initialize Stripe only if secret key is available
+let stripe: Stripe | null = null;
+if (process.env.STRIPE_SECRET_KEY) {
+  stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+    apiVersion: "2025-07-30.basil",
+  });
 }
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2023-10-16",
-});
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
@@ -159,6 +159,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Stripe payment routes
   app.post("/api/create-payment-intent", isAuthenticated, async (req: any, res) => {
+    if (!stripe) {
+      return res.status(503).json({ message: "Payment processing is currently unavailable. Stripe not configured." });
+    }
+
     try {
       const { amount, description } = req.body;
       const userId = req.user.claims.sub;
@@ -187,6 +191,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post('/api/create-subscription', isAuthenticated, async (req: any, res) => {
+    if (!stripe) {
+      return res.status(503).json({ message: "Subscription processing is currently unavailable. Stripe not configured." });
+    }
+
     try {
       const userId = req.user.claims.sub;
       const user = await storage.getUser(userId);
@@ -196,10 +204,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (user.stripeSubscriptionId) {
-        const subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+        const subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId, {
+          expand: ['latest_invoice.payment_intent']
+        });
+        const invoice = subscription.latest_invoice as any;
         return res.json({
           subscriptionId: subscription.id,
-          clientSecret: subscription.latest_invoice?.payment_intent?.client_secret,
+          clientSecret: invoice?.payment_intent?.client_secret,
         });
       }
 
@@ -218,31 +229,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.updateUserStripeInfo(userId, customerId);
       }
 
+      // Create product and price first for subscription
+      const product = await stripe.products.create({
+        name: 'Premium Membership',
+        description: 'Unlimited classes, 2 PT sessions/month, priority booking',
+      });
+
+      const price = await stripe.prices.create({
+        unit_amount: 8999, // £89.99 in pence
+        currency: 'gbp',
+        recurring: { interval: 'month' },
+        product: product.id,
+      });
+
       // Create subscription for premium membership (£89.99/month)
       const subscription = await stripe.subscriptions.create({
         customer: customerId,
-        items: [{
-          price_data: {
-            currency: 'gbp',
-            product_data: {
-              name: 'Premium Membership',
-              description: 'Unlimited classes, 2 PT sessions/month, priority booking',
-            },
-            unit_amount: 8999, // £89.99 in pence
-            recurring: {
-              interval: 'month',
-            },
-          },
-        }],
+        items: [{ price: price.id }],
         payment_behavior: 'default_incomplete',
         expand: ['latest_invoice.payment_intent'],
       });
 
       await storage.updateUserStripeInfo(userId, customerId, subscription.id);
 
+      const invoice = subscription.latest_invoice as any;
       res.json({
         subscriptionId: subscription.id,
-        clientSecret: subscription.latest_invoice?.payment_intent?.client_secret,
+        clientSecret: invoice?.payment_intent?.client_secret,
       });
     } catch (error: any) {
       console.error("Error creating subscription:", error);

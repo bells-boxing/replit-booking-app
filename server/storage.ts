@@ -166,7 +166,7 @@ export class DatabaseStorage implements IStorage {
         .where(
           and(
             gte(classSchedules.startTime, startOfDay),
-            gte(endOfDay, classSchedules.startTime)
+            sql`${classSchedules.startTime} <= ${endOfDay}`
           )
         )
         .orderBy(classSchedules.startTime);
